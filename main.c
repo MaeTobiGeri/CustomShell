@@ -21,7 +21,7 @@ volatile sig_atomic_t sigint_received = 0;
 
 void handle_sigint(int sig) {
     if (current_child > 0) {
-        kill(current_child, SIGINT);
+        kill(-current_child, SIGINT);  // <- FIX: negative PGID kills whole pipeline
     } else {
         write(STDOUT_FILENO, "\n", 1);
         rl_on_new_line();
@@ -35,8 +35,8 @@ void init_shell()
     clear();
     printf("\n\n\n\n******************"
         "************************");
-    printf("\n\n\n\t****Just Another Shell****");
-    printf("\n\n\tUSE AT YOUR OWN RISK");
+    printf("\n\n\n\t****Yet Another Shell****");
+    printf("\n\n\t-USE AT YOUR OWN RISK-");
     printf("\n\n\n\n*******************"
         "***********************");
     printf("\n");
@@ -65,7 +65,7 @@ void handle_redirection(char** command)
         int sz;
         if (command[redirect_index + 1] == NULL) 
         {
-            printf("jash> syntax error near unexpected token newline");
+            printf("Yash> syntax error near unexpected token newline");
             exit(EXIT_FAILURE);   
         }
 
@@ -97,6 +97,7 @@ void handle_pipe(char** command)
     }
 
     int prev_fd = -1;
+    pid_t pgid = 0;
 
     for (int i = 0; i < cmd_count; i++) {
         int pipe_fds[2];
@@ -115,6 +116,9 @@ void handle_pipe(char** command)
         }
 
         if (pid == 0) {
+            if (pgid == 0) pgid = getpid();
+            setpgid(0, pgid);
+
             if (prev_fd != -1) {
                 dup2(prev_fd, STDIN_FILENO);
                 close(prev_fd);
@@ -127,21 +131,25 @@ void handle_pipe(char** command)
 
             char** cmd = &command[cmd_start[i]];
             handle_redirection(cmd);
-
             execvp(cmd[0], cmd);
             perror("execvp");
             exit(1);
         }
+
+        if (pgid == 0) pgid = pid;
+        setpgid(pid, pgid);
+
         if (prev_fd != -1) {
             close(prev_fd);
         }
-
         if (i < cmd_count - 1) {
             close(pipe_fds[1]);
-            prev_fd = pipe_fds[0];   
+            prev_fd = pipe_fds[0];
         }
     }
-    
+
+    current_child = pgid;
+
     for (int i = 0; i < cmd_count; i++) {
         wait(NULL);
     }
@@ -149,9 +157,8 @@ void handle_pipe(char** command)
     {
         close(prev_fd);
     }
-        
+    current_child = -1;
 }
-
 
 int main() {
     char* buf;
@@ -165,7 +172,7 @@ int main() {
     init_shell();
 
     while (1) {
-        buf = readline("\nmsh> ");
+        buf = readline("\nYash> ");
         if (!buf) break;
 
         if(strlen(buf) > 0) {
@@ -184,8 +191,8 @@ int main() {
                 } else {
                     fixed[j++] = buf[i];
                 }
-            }
 
+            }
             fixed[j] = '\0';
             
             char* token = strtok(fixed, " ");
@@ -214,7 +221,6 @@ int main() {
             } else {
 
             pid = fork();
-
 
             switch (pid) {
             case -1:
