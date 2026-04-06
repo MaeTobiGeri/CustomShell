@@ -35,13 +35,121 @@ void init_shell()
     clear();
     printf("\n\n\n\n******************"
         "************************");
-    printf("\n\n\n\t****Custom Shell****");
-    printf("\n\n\t-USE AT YOUR OWN RISK-");
+    printf("\n\n\n\t****Just Another Shell****");
+    printf("\n\n\tUSE AT YOUR OWN RISK");
     printf("\n\n\n\n*******************"
         "***********************");
     printf("\n");
     sleep(1);
     clear();
+}
+
+int letter_Occurance(char** command ,char* searchToken)
+{
+    int index = -1;
+
+    for (int j = 0; command[j] != NULL; j++) {
+        if (strcmp(command[j], searchToken) == 0) {
+            index = j;
+            break;
+        }
+    }
+    return index;
+}
+
+void handle_redirection(char** command)
+{
+    int redirect_index = letter_Occurance(command ,">");
+    
+    if (redirect_index != -1) {
+        int sz;
+        if (command[redirect_index + 1] == NULL) 
+        {
+            printf("jash> syntax error near unexpected token newline");
+            exit(EXIT_FAILURE);   
+        }
+
+        int workingFile = open(command[redirect_index + 1], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+
+        if (workingFile < 0) {
+            perror("r1");
+            exit(1);
+        }
+
+        dup2(workingFile, STDOUT_FILENO);
+        close(workingFile);
+        command[redirect_index] = NULL;
+    } 
+}
+
+void handle_pipe(char** command)
+{
+    int cmd_start[MAXCOM];
+    int cmd_count = 0;
+
+    cmd_start[cmd_count++] = 0;
+
+    for (int i = 0; command[i] != NULL; i++) {
+        if (strcmp(command[i], "|") == 0) {
+            command[i] = NULL; 
+            cmd_start[cmd_count++] = i + 1;
+        }
+    }
+
+    int prev_fd = -1;
+
+    for (int i = 0; i < cmd_count; i++) {
+        int pipe_fds[2];
+
+        if (i < cmd_count - 1) {
+            if (pipe(pipe_fds) < 0) {
+                perror("pipe");
+                exit(1);
+            }
+        }
+
+        int pid = fork();
+        if (pid < 0) {
+            perror("fork");
+            exit(1);
+        }
+
+        if (pid == 0) {
+            if (prev_fd != -1) {
+                dup2(prev_fd, STDIN_FILENO);
+                close(prev_fd);
+            }
+            if (i < cmd_count - 1) {
+                dup2(pipe_fds[1], STDOUT_FILENO);
+                close(pipe_fds[0]);
+                close(pipe_fds[1]);
+            }
+
+            char** cmd = &command[cmd_start[i]];
+            handle_redirection(cmd);
+
+            execvp(cmd[0], cmd);
+            perror("execvp");
+            exit(1);
+        }
+        if (prev_fd != -1) {
+            close(prev_fd);
+        }
+
+        if (i < cmd_count - 1) {
+            close(pipe_fds[1]);
+            prev_fd = pipe_fds[0];   
+        }
+    }
+    
+    for (int i = 0; i < cmd_count; i++) {
+        wait(NULL);
+    }
+    if (prev_fd != -1)
+    {
+        close(prev_fd);
+    }
+        
 }
 
 
@@ -68,15 +176,16 @@ int main() {
             char fixed[MAXLET];
             int j = 0;
 
-            for (int i = 0; buf[i] != '\0' && j < MAXLET - 1; i++) {
-                if (buf[i] == '>') {
+            for (int i = 0; buf[i] != '\0' && j < MAXLET - 4; i++) {
+                if (buf[i] == '>' || buf[i] == '|') {
                     fixed[j++] = ' ';
-                    fixed[j++] = '>';
+                    fixed[j++] = buf[i];
                     fixed[j++] = ' ';
                 } else {
                     fixed[j++] = buf[i];
                 }
             }
+
             fixed[j] = '\0';
             
             char* token = strtok(fixed, " ");
@@ -99,9 +208,13 @@ int main() {
                     chdir(command[1]);
                 }
                 
+            } 
+            else if (letter_Occurance(command, "|") != -1) {
+                handle_pipe(command);
             } else {
 
             pid = fork();
+
 
             switch (pid) {
             case -1:
@@ -115,23 +228,7 @@ int main() {
                     sigaction(SIGINT, &sa, NULL);
                     fflush(stdout);
                     
-                    
-
-                    int redirect_index = -1;
-
-                    for (int j = 0; command[j] != NULL; j++) {
-                        if (strcmp(command[j], ">") == 0) {
-                            redirect_index = j;
-                            perror("r1");
-                            exit(1);
-                        }
-
-                        dup2(workingFile, STDOUT_FILENO);
-                        close(workingFile);
-                        command[redirect_index] = NULL;
-                    }
-
-                    
+                    handle_redirection(command); 
                     execvp(command[0], command);
                     perror("execvp"); 
                     exit(EXIT_FAILURE);
